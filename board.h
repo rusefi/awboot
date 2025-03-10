@@ -7,7 +7,7 @@
 #include "sunxi_sdhci.h"
 
 #define CONFIG_KERNEL_FILENAME "zImage"
-#define CONFIG_DTB_FILENAME	   "sun8i-t113-mangopi-dual.dtb"
+#define CONFIG_DTB_FILENAME	   "sun8i-t113s-lcpi.dtb"
 #ifndef CONFIG_INITRD_FILENAME
 #define CONFIG_INITRD_FILENAME ""
 #endif
