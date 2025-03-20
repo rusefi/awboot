@@ -250,3 +250,55 @@ int load_spi_nand(sunxi_spi_t *spi, image_info_t *image)
 	return 0;
 }
 #endif
+
+#if CONFIG_BOOT_SPINAND
+int load_spi_nor(sunxi_spi_t *spi, image_info_t *image)
+{
+	linux_zimage_header_t *hdr;
+	unsigned int		   size;
+	uint64_t UNUSED_DEBUG	   start, time;
+
+	info(" %" PRIu32 "ms\r\n", time_ms());
+
+	if (spi_nor_detect(spi) != 0)
+		return -1;
+
+	info(" %" PRIu32 "ms\r\n", time_ms());
+
+	/* get dtb size and read */
+	spi_nor_read(spi, image->dtb_dest, CONFIG_SPINAND_DTB_ADDR, (uint32_t)sizeof(boot_param_header_t));
+	if (fdt_check_blob_valid(image->dtb_dest) != 0) {
+		error("SPI-NAND: DTB verification failed\r\n");
+		return -1;
+	}
+
+	size = fdt_get_total_size(image->dtb_dest);
+	debug("SPI-NAND: dt blob: Copy from 0x%08x to 0x%08lx size:0x%08x\r\n", CONFIG_SPINAND_DTB_ADDR,
+		  (uint32_t)image->dtb_dest, size);
+	start = time_us();
+	spi_nor_read(spi, image->dtb_dest, CONFIG_SPINAND_DTB_ADDR, (uint32_t)size);
+	time = time_us() - start;
+	info("SPI-NAND: read dt blob of size %u at %.2fMB/S\r\n", size, (f32)(size / time));
+
+	info(" %" PRIu32 "ms\r\n", time_ms());
+
+	/* get kernel size and read */
+	spi_nor_read(spi, image->kernel_dest, CONFIG_SPINAND_KERNEL_ADDR, (uint32_t)sizeof(linux_zimage_header_t));
+	hdr = (linux_zimage_header_t *)image->kernel_dest;
+	if (hdr->magic != LINUX_ZIMAGE_MAGIC) {
+		debug("SPI-NAND: zImage verification failed\r\n");
+		return -1;
+	}
+	size = hdr->end - hdr->start;
+	debug("SPI-NAND: Image: Copy from 0x%08x to 0x%08lx size:0x%08x\r\n", CONFIG_SPINAND_KERNEL_ADDR,
+		  (uint32_t)image->kernel_dest, size);
+	start = time_us();
+	spi_nor_read(spi, image->kernel_dest, CONFIG_SPINAND_KERNEL_ADDR, (uint32_t)size);
+	time = time_us() - start;
+	info("SPI-NAND: read Image of size %u at %.2fMB/S\r\n", size, (f32)(size / time));
+
+	info(" %" PRIu32 "ms\r\n", time_ms());
+
+	return 0;
+}
+#endif
