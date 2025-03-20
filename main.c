@@ -244,7 +244,7 @@ int main(void)
 			strcpy(cmd_line, CONFIG_DEFAULT_BOOT_CMD);
 		}
 		dma_init();
-		dma_test();
+		//dma_test();
 		debug("SPI: init\r\n");
 		if (sunxi_spi_init(&sunxi_spi0) != 0) {
 			fatal("SPI: init failed\r\n");
