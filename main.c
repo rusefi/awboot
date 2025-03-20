@@ -150,6 +150,9 @@ int main(void)
 	board_init();
 
 	message("\r\n");
+
+	info(" %" PRIu32 "ms\r\n", time_ms());
+
 	info("AWBoot r%" PRIu32 " starting...\r\n", (u32)BUILD_REVISION);
 
 	uint32_t clk_fail = sunxi_clk_get_fail_addr();
@@ -320,6 +323,8 @@ int main(void)
 	} else {
 		image.initrd_dest = NULL;
 	}
+
+	info("done in %" PRIu32 "ms\r\n", time_ms());
 
 	info("booting linux...\r\n");
 	board_set_led(LED_BOARD, 0);

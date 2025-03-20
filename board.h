@@ -46,7 +46,7 @@
 
 #define CONFIG_CPU_FREQ 1200000000
 
-// #define CONFIG_ENABLE_CPU_FREQ_DUMP
+#define CONFIG_ENABLE_CPU_FREQ_DUMP
 
 // 128KB erase sectors, 2KB pages, so place them starting from 2nd sector
 #define CONFIG_SPINAND_DTB_ADDR	   (128 * 2048)
