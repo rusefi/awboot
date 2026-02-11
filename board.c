@@ -13,16 +13,22 @@ sunxi_usart_t usart0_dbg = {
 	.gpio_rx = {GPIO_PIN(PORTE, 3), GPIO_PERIPH_MUX6},
 };
 
-sunxi_usart_t usart5_dbg = {
-	.id		 = 5,
-	.gpio_tx = {GPIO_PIN(PORTB, 4), GPIO_PERIPH_MUX7},
-	.gpio_rx = {GPIO_PIN(PORTB, 5), GPIO_PERIPH_MUX7},
-};
-
 sunxi_usart_t usart3_dbg = {
 	.id		 = 3,
 	.gpio_tx = {GPIO_PIN(PORTB, 6), GPIO_PERIPH_MUX7},
 	.gpio_rx = {GPIO_PIN(PORTB, 7), GPIO_PERIPH_MUX7},
+};
+
+sunxi_usart_t usart4_dbg = {
+	.id		 = 4,
+	.gpio_tx = {GPIO_PIN(PORTE, 4), GPIO_PERIPH_MUX3},
+	.gpio_rx = {GPIO_PIN(PORTE, 5), GPIO_PERIPH_MUX3},
+};
+
+sunxi_usart_t usart5_dbg = {
+	.id		 = 5,
+	.gpio_tx = {GPIO_PIN(PORTB, 4), GPIO_PERIPH_MUX7},
+	.gpio_rx = {GPIO_PIN(PORTB, 5), GPIO_PERIPH_MUX7},
 };
 
 sunxi_spi_t sunxi_spi0 = {

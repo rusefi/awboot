@@ -58,6 +58,7 @@
 
 extern sunxi_usart_t usart0_dbg;
 extern sunxi_usart_t usart3_dbg;
+extern sunxi_usart_t usart4_dbg;
 extern sunxi_usart_t usart5_dbg;
 extern sunxi_spi_t	 sunxi_spi0;
 
