@@ -151,7 +151,11 @@
 / Drive/Volume Configurations
 /---------------------------------------------------------------------------*/
 
+#if CONFIG_RAUC_EMMC
+#define FF_VOLUMES 2
+#else
 #define FF_VOLUMES 1
+#endif
 /* Number of volumes (logical drives) to be used. (1-10) */
 
 #define FF_STR_VOLUME_ID 0
@@ -167,7 +171,11 @@
 /  const char* VolumeStr[FF_VOLUMES] = {"ram","flash","sd","usb",...
 */
 
+#if CONFIG_RAUC_EMMC
+#define FF_MULTI_PARTITION 1
+#else
 #define FF_MULTI_PARTITION 0
+#endif
 /* This option switches support for multiple volumes on the physical drive.
 /  By default (0), each logical drive number is bound to the same physical drive
 /  number and only an FAT volume found on the physical drive will be mounted.

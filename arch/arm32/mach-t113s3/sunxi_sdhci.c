@@ -396,7 +396,7 @@ static int wait_done(sdhci_t *sdhci, sdhci_data_t *dat, u32 timeout_msecs, u32 f
 	trace("SMHC: wait for flag 0x%" PRIx32 "\r\n", flag);
 	do {
 		status = sdhci->reg->rint;
-		if ((time_ms() > (start + timeout_msecs))) {
+		if (time_ms() - start > timeout_msecs) {
 			if (status_out)
 				*status_out = status;
 			return -1;
@@ -422,11 +422,9 @@ static bool read_bytes(sdhci_t *sdhci, sdhci_data_t *dat)
 	u32	 count = dat->blkcnt * dat->blksz;
 	u32 *tmp   = (u32 *)dat->buf;
 	u32	 status, err, done;
-	u32	 timeout = time_ms() + count;
+	u32	 start = time_ms();
+	u32	 timeout_msecs = (count < 250U) ? 250U : count;
 	u32	 in_fifo;
-
-	if (timeout < 250)
-		timeout = 250;
 
 	trace("SMHC: read %" PRIu32 "\r\n", count);
 
@@ -438,7 +436,7 @@ static bool read_bytes(sdhci_t *sdhci, sdhci_data_t *dat)
 
 	while ((!err) && (count >= sizeof(sdhci->reg->fifo))) {
 		while (sdhci->reg->status & SMHC_STATUS_FIFO_EMPTY) {
-			if (time_ms() > timeout) {
+			if (time_ms() - start > timeout_msecs) {
 				warning("SMHC: read timeout\r\n");
 				return FALSE;
 			}
@@ -461,6 +459,10 @@ static bool read_bytes(sdhci_t *sdhci, sdhci_data_t *dat)
 			done = status & SMHC_RINT_AUTO_COMMAND_DONE;
 		else
 			done = status & SMHC_RINT_DATA_OVER;
+		if (time_ms() - start > timeout_msecs) {
+			warning("SMHC: read completion timeout\r\n");
+			return FALSE;
+		}
 
 	} while (!done && !err);
 
@@ -482,10 +484,8 @@ static bool write_bytes(sdhci_t *sdhci, sdhci_data_t *dat)
 	uint64_t count = dat->blkcnt * dat->blksz;
 	u32		*tmp   = (u32 *)dat->buf;
 	u32		 status, err, done;
-	u32		 timeout = time_ms() + count;
-
-	if (timeout < 250)
-		timeout = 250;
+	u32		 start = time_ms();
+	u32		 timeout_msecs = (count < 250U) ? 250U : (u32)count;
 
 	trace("SMHC: write %llu\r\n", count);
 
@@ -493,7 +493,7 @@ static bool write_bytes(sdhci_t *sdhci, sdhci_data_t *dat)
 	err	   = sdhci->reg->rint & SMHC_RINT_INTERRUPT_ERROR_BIT;
 	while (!err && count) {
 		while (sdhci->reg->status & SMHC_STATUS_FIFO_FULL) {
-			if (time_ms() > timeout) {
+			if (time_ms() - start > timeout_msecs) {
 				warning("SMHC: write timeout\r\n");
 				return FALSE;
 			}
@@ -512,6 +512,10 @@ static bool write_bytes(sdhci_t *sdhci, sdhci_data_t *dat)
 			done = status & SMHC_RINT_AUTO_COMMAND_DONE;
 		else
 			done = status & SMHC_RINT_DATA_OVER;
+		if (time_ms() - start > timeout_msecs) {
+			warning("SMHC: write completion timeout\r\n");
+			return FALSE;
+		}
 	} while (!done && !err);
 
 	if (err & SMHC_RINT_INTERRUPT_ERROR_BIT)
@@ -579,7 +583,7 @@ bool sdhci_transfer(sdhci_t *sdhci, sdhci_cmd_t *cmd, sdhci_data_t *dat)
 	sdhci->reg->rint = 0xffffffff; // Clear status
 	sdhci->reg->arg	 = cmd->arg;
 
-	if (dat && (dat->blkcnt * dat->blksz) > 64) {
+	if (dat && (dat->blkcnt * dat->blksz) > 64 && !(dat->flag & MMC_DATA_PIO)) {
 		dma = true;
 		sdhci->reg->gctrl &= ~SMHC_GCTRL_ACCESS_BY_AHB;
 		prepare_dma(sdhci, dat);
@@ -611,10 +615,11 @@ bool sdhci_transfer(sdhci_t *sdhci, sdhci_cmd_t *cmd, sdhci_data_t *dat)
 	}
 
 	if (cmd->resptype & MMC_RSP_BUSY) {
+		const u32 busy_timeout_ms = cmd->busy_timeout_ms != 0U ? cmd->busy_timeout_ms : 10U;
 		timeout = time_ms();
 		do {
 			status = sdhci->reg->status;
-			if (time_ms() - timeout > 10) {
+			if (time_ms() - timeout > busy_timeout_ms) {
 				sdhci->reg->gctrl = SMHC_GCTRL_HARDWARE_RESET;
 				sdhci->reg->rint  = 0xffffffff;
 				warning("SMHC: busy timeout\r\n");

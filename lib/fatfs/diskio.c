@@ -16,6 +16,12 @@
 #include "board.h"
 
 static DSTATUS Stat = STA_NOINIT; /* Disk status */
+#if FF_MULTI_PARTITION
+PARTITION VolToPart[FF_VOLUMES] = {
+	{0U, 1U},
+	{0U, 2U},
+};
+#endif
 #ifdef CONFIG_FATFS_CACHE_SIZE
 static u8 *const cache		= (u8 *)SDRAM_BASE;
 static const u32 cache_size = (CONFIG_FATFS_CACHE_SIZE);

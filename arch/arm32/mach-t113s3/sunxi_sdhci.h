@@ -80,6 +80,7 @@ typedef struct {
 	u32 idx;
 	u32 arg;
 	u32 resptype;
+	u32 busy_timeout_ms;
 	u32 response[4];
 } sdhci_cmd_t;
 

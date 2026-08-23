@@ -9,6 +9,10 @@ SRCS	+=  $(LIB)/loaders.c
 endif
 
 SRCS	+=  $(LIB)/fdt.c
+SRCS	+=  $(LIB)/bootstate.c
+SRCS	+=  $(LIB)/bootstate_storage.c
+SRCS	+=  $(LIB)/rauc_mbr.c
+SRCS	+=  $(LIB)/rauc_boot.c
 SRCS	+=  $(LIB)/debug.c
 SRCS	+=  $(LIB)/string.c
 SRCS	+=  $(LIB)/xformat.c

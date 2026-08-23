@@ -9,5 +9,9 @@
 build-*/*
 
 tools/mksunxi
+tools/awboot-bootstate
+tests/bootstate_test
+tests/rauc_boot_test
+tests/rauc_mbr_test
 
 *boot.img

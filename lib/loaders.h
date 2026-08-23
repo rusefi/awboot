@@ -5,6 +5,9 @@
 
 #if CONFIG_BOOT_SDCARD || CONFIG_BOOT_MMC
 int	 mount_sdmmc(void);
+#if CONFIG_RAUC_EMMC
+int	 mount_sdmmc_volume(unsigned int volume);
+#endif
 void unmount_sdmmc(void);
 int	 read_file(const char *filename, uint8_t *dest);
 int	 load_sdmmc(image_info_t *image);

@@ -10,6 +10,7 @@
 #include "board.h"
 #include "barrier.h"
 #include "loaders.h"
+#include "rauc_boot.h"
 #include "sunxi_dma.h"
 #include <asm/armv7.h>
 #include <psci.h>
@@ -102,7 +103,28 @@ static char   kernel_filename[MAX_FILENAME_SIZE]  = CONFIG_KERNEL_FILENAME;
 static char   dtb_filename[MAX_FILENAME_SIZE]	   = CONFIG_DTB_FILENAME;
 static char   initrd_filename[MAX_FILENAME_SIZE] = CONFIG_INITRD_FILENAME;
 
+#if CONFIG_RAUC_EMMC
+static char cmd_line[AWBOOT_RAUC_CMDLINE_SIZE] = {0};
+static struct awboot_rauc_boot_result rauc_boot_result;
+
+static bool rauc_read_sector(void *context, uint64_t lba, uint8_t sector[AWBOOT_BOOTSTATE_SECTOR_SIZE])
+{
+	return sdmmc_blk_read(context, sector, lba, 1U) == 1U;
+}
+
+static bool rauc_write_sector(void *context, uint64_t lba,
+							  const uint8_t sector[AWBOOT_BOOTSTATE_SECTOR_SIZE])
+{
+	return sdmmc_blk_write(context, sector, lba);
+}
+
+static bool rauc_sync(void *context)
+{
+	return sdmmc_sync(context);
+}
+#else
 static char cmd_line[128] = {0};
+#endif
 
 static int boot_image_setup(unsigned char *addr, unsigned int *entry)
 {
@@ -196,9 +218,38 @@ int main(void)
 		sdmmc_speed_test();
 #endif
 		info("SMHC: mount start\r\n");
+#if CONFIG_RAUC_EMMC
+		const struct awboot_rauc_boot_io rauc_io = {
+			.context = &card0,
+			.sector_count = card0.card.capacity / AWBOOT_RAUC_MBR_SECTOR_SIZE,
+			.read_sector = rauc_read_sector,
+			.write_sector = rauc_write_sector,
+			.sync = rauc_sync,
+		};
+		const enum awboot_rauc_boot_status rauc_status =
+			awboot_rauc_boot_prepare(&rauc_io, &rauc_boot_result);
+		if (rauc_status != AWBOOT_RAUC_BOOT_OK) {
+			fatal("RAUC: selection failed status=%u mbr=%u state=%u\r\n",
+				  (unsigned int)rauc_status, (unsigned int)rauc_boot_result.mbr_status,
+				  (unsigned int)rauc_boot_result.storage_status);
+		}
+		if (!awboot_rauc_boot_format_cmdline(&rauc_boot_result, cmd_line)) {
+			fatal("RAUC: command line failed\r\n");
+		}
+		info("RAUC: slot %c root=%s tries=%u%s\r\n",
+			 rauc_boot_result.selected_slot == AWBOOT_BOOTSTATE_SLOT_A ? 'A' : 'B',
+			 rauc_boot_result.root_partuuid,
+			 (unsigned int)rauc_boot_result.state.tries_remaining[rauc_boot_result.selected_slot],
+			 rauc_boot_result.fallback ? " fallback" : "");
+		sunxi_wdg_set(16);
+		if (mount_sdmmc_volume(rauc_boot_result.selected_slot) != 0) {
+			fatal("SMHC: slot volume mount failed\r\n");
+		}
+#else
 		if (mount_sdmmc() != 0) {
 			fatal("SMHC: card mount failed\r\n");
 		}
+#endif
 
 		image.initrd_size = 0; // Set by load_sdmmc()
 		sd_boot_ready		  = true;

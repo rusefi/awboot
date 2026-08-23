@@ -114,6 +114,7 @@ enum {
 enum {
 	MMC_DATA_READ  = (1 << 0),
 	MMC_DATA_WRITE = (1 << 1),
+	MMC_DATA_PIO   = (1 << 2),
 };
 
 enum {
@@ -175,5 +176,7 @@ extern sdmmc_pdata_t card0;
 
 int		 sdmmc_init(sdmmc_pdata_t *data, sdhci_t *hci);
 uint64_t sdmmc_blk_read(sdmmc_pdata_t *data, uint8_t *buf, uint64_t blkno, uint64_t blkcnt);
+bool	 sdmmc_blk_write(sdmmc_pdata_t *data, const uint8_t *buf, uint64_t blkno);
+bool	 sdmmc_sync(sdmmc_pdata_t *data);
 
 #endif /* __SDCARD_H__ */

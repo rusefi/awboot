@@ -33,7 +33,7 @@ HOSTSTRIP=strip
 
 MAKE=make
 
-SUPPORTED_VARIANTS := fel spi sdmmc emmc all
+SUPPORTED_VARIANTS := fel spi sdmmc emmc emmc-rauc all
 VARIANT ?= emmc spi sdmmc
 comma := ,
 VARIANT_LIST := $(strip $(subst $(comma), ,$(VARIANT)))
@@ -141,8 +141,15 @@ $(eval $(call REGISTER_VARIANT,sdmmc,CONFIG_BOOT_SPINAND=0 CONFIG_BOOT_SDCARD=1 
 endif
 
 # build emmc only image without spi
+# eMMC lives on SMHC2 (0x04022000), so the eMMC boot image must target sdhci2
+# instead of the default sdhci0 (the SD-card slot on SMHC0).
 ifneq ($(filter emmc,$(BUILD_VARIANTS)),)
-$(eval $(call REGISTER_VARIANT,emmc,CONFIG_BOOT_SPINAND=0 CONFIG_BOOT_SDCARD=0 CONFIG_BOOT_MMC=1))
+$(eval $(call REGISTER_VARIANT,emmc,CONFIG_BOOT_SPINAND=0 CONFIG_BOOT_SDCARD=0 CONFIG_BOOT_MMC=1 SDHCI=sdhci2))
+endif
+
+# eMMC-only RAUC A/B image. Keep this separate until hardware fallback passes.
+ifneq ($(filter emmc-rauc,$(BUILD_VARIANTS)),)
+$(eval $(call REGISTER_VARIANT,emmc-rauc,CONFIG_BOOT_SPINAND=0 CONFIG_BOOT_SDCARD=0 CONFIG_BOOT_MMC=1 CONFIG_RAUC_EMMC=1 SDHCI=sdhci2))
 endif
 
 # build image with everything
@@ -193,6 +200,13 @@ ifneq ($(filter emmc,$(BUILD_VARIANTS)),)
 	$(SIZE) build-emmc/$(TARGET)-boot.elf
 	cp -f build-emmc/$(TARGET)-boot.bin $(TARGET)-boot-emmc.bin
 	tools/mksunxi $(TARGET)-boot-emmc.bin 512
+endif
+
+ifneq ($(filter emmc-rauc,$(BUILD_VARIANTS)),)
+	echo "eMMC RAUC:"
+	$(SIZE) build-emmc-rauc/$(TARGET)-boot.elf
+	cp -f build-emmc-rauc/$(TARGET)-boot.bin $(TARGET)-boot-emmc-rauc.bin
+	tools/mksunxi $(TARGET)-boot-emmc-rauc.bin 512
 endif
 
 ifneq ($(filter all,$(BUILD_VARIANTS)),)

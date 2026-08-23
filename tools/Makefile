@@ -2,6 +2,7 @@
 BUILD_DIR=build
 
 MKSUNXI = mksunxi
+BOOTSTATECTL = awboot-bootstate
 
 CSRC    = mksunxi.c
 CXXSRC  =
@@ -17,7 +18,7 @@ CC  ?= gcc
 CXX ?= g++
 
 all: tools
-tools: $(MKSUNXI)
+tools: $(MKSUNXI) $(BOOTSTATECTL)
 
 .PHONY: all tools clean
 .SILENT:
@@ -25,6 +26,7 @@ tools: $(MKSUNXI)
 clean:
 	rm -rf build
 	rm -f $(MKSUNXI)
+	rm -f $(BOOTSTATECTL)
 
 $(BUILD_DIR)/%.o : %.c
 	echo "  CC    $@"
@@ -39,3 +41,7 @@ $(BUILD_DIR)/%.opp : %.cpp
 $(MKSUNXI): $(COBJS)
 	echo "  LD    $@"
 	$(CC) $(CFLAGS) $(COBJS) -o $(MKSUNXI)
+
+$(BOOTSTATECTL): awboot_bootstate.c ../lib/bootstate.c ../lib/bootstate_storage.c
+	echo "  CC    $@"
+	$(CC) -O2 -std=c11 -Wall -Wextra -Werror -I../lib $^ -o $@

@@ -121,6 +121,17 @@
 #define EXT_CSD_TIMING_BC	0
 #define EXT_CSD_TIMING_HS	1
 
+#define MMC_SWITCH_MODE_WRITE_BYTE (3U << 24)
+#define MMC_STATUS_READY_FOR_DATA   (1U << 8)
+#define MMC_STATUS_SWITCH_ERROR		(1U << 7)
+#define MMC_STATUS_ERROR_MASK                                                                                          \
+	((1U << 31) | (1U << 30) | (1U << 29) | (1U << 28) | (1U << 27) | (1U << 26) | (1U << 25) | (1U << 24) |       \
+	 (1U << 23) | (1U << 22) | (1U << 21) | (1U << 20) | (1U << 19) | (1U << 18) | (1U << 17) | (1U << 16) |       \
+	 (1U << 15) | (1U << 13) | MMC_STATUS_SWITCH_ERROR | (1U << 3))
+
+#define MMC_WRITE_TIMEOUT_MS 6000U
+#define MMC_FLUSH_TIMEOUT_MS 30000U
+
 #define EXT_CSD_CARD_TYPE_26	   (1 << 0) /* Card can run at 26MHz */
 #define EXT_CSD_CARD_TYPE_52	   (1 << 1) /* Card can run at 52MHz */
 #define EXT_CSD_CARD_TYPE_MASK	   0x3F /* Mask out reserved bits */
@@ -326,6 +337,58 @@ static int sdmmc_status(sdhci_t *hci, sdmmc_t *card)
 		return ((cmd.response[0] >> 9) & 0xf);
 	warning("SMHC: status error\r\n");
 	return -1;
+}
+
+static bool sdmmc_wait_ready(sdmmc_pdata_t *data, uint32_t timeout_ms)
+{
+	const uint32_t start = time_ms();
+	sdhci_cmd_t	   cmd;
+	sdhci_t		  *hci  = data->hci;
+	sdmmc_t		  *card = &data->card;
+
+	do {
+		memset(&cmd, 0, sizeof(cmd));
+		cmd.idx		 = MMC_SEND_STATUS;
+		cmd.resptype = MMC_RSP_R1;
+		cmd.arg		 = card->rca << 16;
+		if (sdhci_transfer(hci, &cmd, NULL)) {
+			const uint32_t status = cmd.response[0];
+			if ((status & MMC_STATUS_ERROR_MASK) != 0U) {
+				warning("SMHC: card status error 0x%08" PRIx32 "\r\n", status);
+				data->online = false;
+				return false;
+			}
+			if ((status & MMC_STATUS_READY_FOR_DATA) != 0U &&
+				((status >> 9) & 0xfU) == MMC_STATUS_TRAN) {
+				return true;
+			}
+		}
+		mdelay(1);
+	} while (time_ms() - start <= timeout_ms);
+
+	warning("SMHC: card ready timeout\r\n");
+	data->online = false;
+	return false;
+}
+
+static bool mmc_refresh_ext_csd(sdmmc_pdata_t *data)
+{
+	sdhci_cmd_t  cmd = {0};
+	sdhci_data_t dat = {0};
+
+	cmd.idx		 = MMC_SEND_EXT_CSD;
+	cmd.resptype = MMC_RSP_R1;
+	dat.buf		 = data->card.extcsd;
+	dat.flag	 = MMC_DATA_READ | MMC_DATA_PIO;
+	dat.blksz	 = 512U;
+	dat.blkcnt	 = 1U;
+	if (!sdhci_transfer(data->hci, &cmd, &dat) || (cmd.response[0] & MMC_STATUS_ERROR_MASK) != 0U) {
+		warning("SMHC: EXT_CSD refresh failed\r\n");
+		data->online = false;
+		return false;
+	}
+
+	return sdmmc_wait_ready(data, MMC_WRITE_TIMEOUT_MS);
 }
 
 static uint64_t sdmmc_read_blocks(sdhci_t *hci, sdmmc_t *card, uint8_t *buf, uint64_t start, uint64_t blkcnt)
@@ -598,8 +661,10 @@ static bool sdmmc_detect(sdhci_t *hci, sdmmc_t *card)
 			csize		   = UNSTUFF_BITS(card->csd, 48, 22);
 			card->capacity = (1 + csize) << 10;
 		} else {
-			card->capacity = card->extcsd[EXT_CSD_SEC_CNT] << 0 | card->extcsd[EXT_CSD_SEC_CNT + 1] << 8 |
-							 card->extcsd[EXT_CSD_SEC_CNT + 2] << 16 | card->extcsd[EXT_CSD_SEC_CNT + 3] << 24;
+			card->capacity = (uint32_t)card->extcsd[EXT_CSD_SEC_CNT] |
+							 ((uint32_t)card->extcsd[EXT_CSD_SEC_CNT + 1] << 8U) |
+							 ((uint32_t)card->extcsd[EXT_CSD_SEC_CNT + 2] << 16U) |
+							 ((uint32_t)card->extcsd[EXT_CSD_SEC_CNT + 3] << 24U);
 		}
 	} else {
 		cmult		   = UNSTUFF_BITS(card->csd, 47, 3);
@@ -733,17 +798,110 @@ static bool sdmmc_detect(sdhci_t *hci, sdmmc_t *card)
 uint64_t sdmmc_blk_read(sdmmc_pdata_t *data, uint8_t *buf, uint64_t blkno, uint64_t blkcnt)
 {
 	uint64_t cnt, blks = blkcnt;
-	sdmmc_t *sdcard = &data->card;
+	sdmmc_t *sdcard;
+
+	if (data == NULL || data->hci == NULL || !data->online || buf == NULL || blkcnt == 0U) {
+		return 0;
+	}
+	sdcard = &data->card;
 
 	while (blks > 0) {
 		cnt = (blks > 127) ? 127 : blks;
-		if (sdmmc_read_blocks(data->hci, sdcard, buf, blkno, cnt) != cnt)
+		if (sdmmc_read_blocks(data->hci, sdcard, buf, blkno, cnt) != cnt) {
+			data->online = false;
 			return 0;
+		}
 		blks -= cnt;
 		blkno += cnt;
 		buf += cnt * sdcard->read_bl_len;
 	}
 	return blkcnt;
+}
+
+bool sdmmc_blk_write(sdmmc_pdata_t *data, const uint8_t *buf, uint64_t blkno)
+{
+	sdmmc_t		*card;
+	sdhci_cmd_t cmd = {0};
+	sdhci_data_t dat = {0};
+
+	if (data == NULL || data->hci == NULL || !data->online || buf == NULL || ((uintptr_t)buf & 3U) != 0U) {
+		return false;
+	}
+	card = &data->card;
+	if (card->write_bl_len != 512U || blkno >= card->capacity / card->write_bl_len) {
+		return false;
+	}
+
+	cmd.idx		 = MMC_WRITE_SINGLE_BLOCK;
+	cmd.arg		 = card->high_capacity ? (uint32_t)blkno : (uint32_t)(blkno * card->write_bl_len);
+	cmd.resptype = MMC_RSP_R1;
+	dat.buf		 = (uint8_t *)buf;
+	dat.flag	 = MMC_DATA_WRITE | MMC_DATA_PIO;
+	dat.blksz	 = card->write_bl_len;
+	dat.blkcnt	 = 1U;
+
+	if (!sdhci_transfer(data->hci, &cmd, &dat)) {
+		warning("SMHC: write failed\r\n");
+		data->online = false;
+		return false;
+	}
+	if ((cmd.response[0] & MMC_STATUS_ERROR_MASK) != 0U) {
+		warning("SMHC: write status error 0x%08" PRIx32 "\r\n", cmd.response[0]);
+		data->online = false;
+		return false;
+	}
+
+	return sdmmc_wait_ready(data, MMC_WRITE_TIMEOUT_MS);
+}
+
+bool sdmmc_sync(sdmmc_pdata_t *data)
+{
+	sdmmc_t		*card;
+	sdhci_cmd_t cmd = {0};
+	uint32_t	 cache_size;
+
+	if (data == NULL || data->hci == NULL || !data->online) {
+		return false;
+	}
+	card = &data->card;
+	if (!sdmmc_wait_ready(data, MMC_WRITE_TIMEOUT_MS)) {
+		return false;
+	}
+	if ((card->version & MMC_VERSION_MMC) == 0U) {
+		return true;
+	}
+	if (card->version < MMC_VERSION_4) {
+		return true;
+	}
+	if (!mmc_refresh_ext_csd(data)) {
+		return false;
+	}
+
+	cache_size = (uint32_t)card->extcsd[EXT_CSD_CACHE_SIZE] |
+			 ((uint32_t)card->extcsd[EXT_CSD_CACHE_SIZE + 1U] << 8U) |
+			 ((uint32_t)card->extcsd[EXT_CSD_CACHE_SIZE + 2U] << 16U) |
+			 ((uint32_t)card->extcsd[EXT_CSD_CACHE_SIZE + 3U] << 24U);
+	if (cache_size == 0U || (card->extcsd[EXT_CSD_CACHE_CTRL] & 1U) == 0U) {
+		return true;
+	}
+
+	cmd.idx			 = MMC_SWITCH;
+	cmd.arg			 = MMC_SWITCH_MODE_WRITE_BYTE | (EXT_CSD_FLUSH_CACHE << 16) | (1U << 8) |
+					   EXT_CSD_CMD_SET_NORMAL;
+	cmd.resptype		 = MMC_RSP_R1B;
+	cmd.busy_timeout_ms = MMC_FLUSH_TIMEOUT_MS;
+	if (!sdhci_transfer(data->hci, &cmd, NULL)) {
+		warning("SMHC: cache flush failed\r\n");
+		data->online = false;
+		return false;
+	}
+	if ((cmd.response[0] & MMC_STATUS_ERROR_MASK) != 0U) {
+		warning("SMHC: cache flush status error 0x%08" PRIx32 "\r\n", cmd.response[0]);
+		data->online = false;
+		return false;
+	}
+
+	return sdmmc_wait_ready(data, MMC_FLUSH_TIMEOUT_MS);
 }
 
 int sdmmc_init(sdmmc_pdata_t *data, sdhci_t *hci)
@@ -754,6 +912,7 @@ int sdmmc_init(sdmmc_pdata_t *data, sdhci_t *hci)
 
 	do {
 		if (sdmmc_detect(data->hci, &data->card) == TRUE) {
+			data->online = TRUE;
 			info("SHMC: %s card detected\r\n", data->card.version & SD_VERSION_SD ? "SD" : "MMC");
 			return 0;
 		}

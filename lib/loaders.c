@@ -9,7 +9,13 @@
 
 #include "sdmmc.h"
 
-FATFS fs;
+#if CONFIG_RAUC_EMMC
+static FATFS fs[FF_VOLUMES];
+static unsigned int active_volume;
+static bool volume_mounted;
+#else
+static FATFS fs;
+#endif
 
 #ifndef CLTBL_DWORDS
 #define CLTBL_DWORDS 2000U
@@ -24,9 +30,26 @@ static FRESULT read_stream(const char *path, void (*consume)(const uint8_t *, UI
 	FRESULT fret;
 	FIL	file;
 	UINT	bytes_read = 0U;
+#if CONFIG_RAUC_EMMC
+	char volume_path[MAX_FILENAME_SIZE + 4U];
+#endif
 
 	if ((path == NULL) || (consume == NULL))
 		return FR_INVALID_PARAMETER;
+
+#if CONFIG_RAUC_EMMC
+	const size_t path_length = strlen(path);
+	if (!volume_mounted || path_length + 4U > sizeof(volume_path))
+		return FR_INVALID_PARAMETER;
+	volume_path[0] = (char)('0' + active_volume);
+	volume_path[1] = ':';
+	volume_path[2] = '/';
+	memcpy(volume_path + 3U, path[0] == '/' ? path + 1U : path,
+		   path[0] == '/' ? path_length : path_length + 1U);
+	if (path[0] == '/')
+		volume_path[path_length + 2U] = '\0';
+	path = volume_path;
+#endif
 
 	fret = f_open(&file, path, FA_READ);
 	if (fret != FR_OK)
@@ -102,6 +125,9 @@ void sdmmc_speed_test(void)
 
 int mount_sdmmc()
 {
+#if CONFIG_RAUC_EMMC
+	return mount_sdmmc_volume(0U);
+#else
 	FRESULT fret;
 
 	/* mount fs */
@@ -114,14 +140,49 @@ int mount_sdmmc()
 	}
 
 	return 0;
+#endif
 }
+
+#if CONFIG_RAUC_EMMC
+int mount_sdmmc_volume(unsigned int volume)
+{
+	FRESULT fret;
+	char path[3];
+
+	if (volume >= FF_VOLUMES)
+		return -1;
+	path[0] = (char)('0' + volume);
+	path[1] = ':';
+	path[2] = '\0';
+	fret = f_mount(&fs[volume], path, 1);
+	if (fret != FR_OK) {
+		error("FATFS: volume %u mount error: %d\r\n", volume, fret);
+		return -1;
+	}
+	active_volume = volume;
+	volume_mounted = true;
+	debug("FATFS: volume %u mount OK\r\n", volume);
+	return 0;
+}
+#endif
 
 void unmount_sdmmc(void)
 {
 	FRESULT fret;
 
 	/* umount fs */
+#if CONFIG_RAUC_EMMC
+	char path[3];
+	if (!volume_mounted)
+		return;
+	path[0] = (char)('0' + active_volume);
+	path[1] = ':';
+	path[2] = '\0';
+	fret = f_mount(0, path, 0);
+	volume_mounted = false;
+#else
 	fret = f_mount(0, "", 0);
+#endif
 	if (fret != FR_OK) {
 		error("FATFS: unmount error %d\r\n", fret);
 	} else {
