@@ -10,6 +10,9 @@
 #include "sdmmc.h"
 
 #if CONFIG_RAUC_EMMC
+#if FF_VOLUMES != 2 || FF_MULTI_PARTITION != 1
+#error "RAUC eMMC requires two FatFs volumes with explicit partition mapping"
+#endif
 static FATFS fs[FF_VOLUMES];
 static unsigned int active_volume;
 static bool volume_mounted;
@@ -242,13 +245,13 @@ int load_sdmmc(image_info_t *image)
 	ret = read_file(image->of_filename, image->dtb_dest);
 	if (ret <= 0)
 		return ret;
-	image->kernel_size = ret;
+	image->dtb_size = ret;
 
 	info("FATFS: read %s addr=%x\r\n", image->filename, (unsigned int)image->kernel_dest);
 	ret = read_file(image->filename, image->kernel_dest);
 	if (ret <= 0)
 		return ret;
-	image->dtb_size = ret;
+	image->kernel_size = ret;
 
 	if (image->initrd_filename && image->initrd_dest) {
 		if (strlen(image->initrd_filename)) {

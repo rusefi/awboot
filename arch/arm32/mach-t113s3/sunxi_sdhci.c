@@ -224,6 +224,7 @@ timing mode
 #define SDXC_CAL_DL_SW_SHIFT  0
 #define SDXC_CAL_DL_SW_EN     BIT(7)
 #define SDXC_CAL_TIMEOUT_MS   50
+#define SMHC_RESET_TIMEOUT_MS 100U
 #define SUNXI_MMC_NTSR_MODE_SEL_NEW (0x1 << 31)
 
 static void sdhci_configure_start_bit_detection(sdhci_t *sdhci, bool hs400_mode)
@@ -318,6 +319,7 @@ static int prepare_dma(sdhci_t *sdhci, sdhci_data_t *data)
 	u32				   buff_frag_num = 0;
 	u32				   remain;
 	u32				   i;
+	u32				   reset_start;
 
 	buff		  = data->buf;
 	buff_frag_num = byte_cnt >> SMHC_DES_NUM_SHIFT;
@@ -372,7 +374,12 @@ static int prepare_dma(sdhci_t *sdhci, sdhci_data_t *data)
 	sdhci->reg->idst = 0x337; // clear interrupt status
 	sdhci->reg->gctrl |= SMHC_GCTRL_DMA_ENABLE | SMHC_GCTRL_DMA_RESET; /* dma enable */
 	sdhci->reg->dmac = SMHC_IDMAC_SOFT_RESET; /* idma reset */
+	reset_start = time_ms();
 	while (sdhci->reg->dmac & SMHC_IDMAC_SOFT_RESET) {
+		if (time_ms() - reset_start > SMHC_RESET_TIMEOUT_MS) {
+			warning("SMHC: IDMA reset timeout\r\n");
+			return -1;
+		}
 	} /* wait idma reset done */
 
 	sdhci->reg->dmac = SMHC_IDMAC_FIX_BURST | SMHC_IDMAC_IDMA_ON; /* idma on */
@@ -586,7 +593,8 @@ bool sdhci_transfer(sdhci_t *sdhci, sdhci_cmd_t *cmd, sdhci_data_t *dat)
 	if (dat && (dat->blkcnt * dat->blksz) > 64 && !(dat->flag & MMC_DATA_PIO)) {
 		dma = true;
 		sdhci->reg->gctrl &= ~SMHC_GCTRL_ACCESS_BY_AHB;
-		prepare_dma(sdhci, dat);
+		if (prepare_dma(sdhci, dat) != 0)
+			return FALSE;
 		sdhci->reg->cmd = cmdval | cmd->idx | SMHC_CMD_START; // Start
 	} else if (dat && (dat->blkcnt * dat->blksz) > 0) {
 		sdhci->reg->gctrl |= SMHC_GCTRL_ACCESS_BY_AHB;

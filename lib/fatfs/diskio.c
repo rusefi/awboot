@@ -22,7 +22,15 @@ PARTITION VolToPart[FF_VOLUMES] = {
 	{0U, 2U},
 };
 #endif
-#ifdef CONFIG_FATFS_CACHE_SIZE
+#if CONFIG_RAUC_EMMC
+#ifndef CONFIG_FATFS_CACHE_SIZE
+#error "RAUC eMMC requires an SDRAM read-bounce size"
+#elif CONFIG_FATFS_CACHE_SIZE == 0
+#error "RAUC eMMC read-bounce size must be nonzero"
+#endif
+static u8 *const read_bounce = (u8 *)SDRAM_BASE;
+#endif
+#if defined(CONFIG_FATFS_CACHE_SIZE) && !CONFIG_RAUC_EMMC
 static u8 *const cache		= (u8 *)SDRAM_BASE;
 static const u32 cache_size = (CONFIG_FATFS_CACHE_SIZE);
 static u32		 cache_first, cache_last;
@@ -38,7 +46,7 @@ DSTATUS disk_status(BYTE pdrv /* Physical drive nmuber to identify the drive */
 	if (pdrv)
 		return STA_NOINIT;
 
-#ifdef CONFIG_FATFS_CACHE_SIZE
+#if defined(CONFIG_FATFS_CACHE_SIZE) && !CONFIG_RAUC_EMMC
 	cache_first = 0xFFFFFFFF - cache_size; // Set to a big sector for a proper init
 	cache_last	= 0xFFFFFFFF;
 #endif
@@ -71,20 +79,37 @@ DRESULT disk_read(BYTE	pdrv, /* Physical drive nmuber to identify the drive */
 				  UINT	count /* Number of sectors to read */
 )
 {
+#if defined(CONFIG_FATFS_CACHE_SIZE) && !CONFIG_RAUC_EMMC
 	u32 blkread, read_pos, first, last, chunk, bytes;
+#endif
 
 	if (pdrv || !count)
 		return RES_PARERR;
 	if (Stat & STA_NOINIT)
 		return RES_NOTRDY;
 
+	trace("FATFS: read %" PRIu32 " sectors at %" PRIu32 "\r\n", (uint32_t)count, (uint32_t)sector);
+
+#if CONFIG_RAUC_EMMC
+	/* Keep IDMA payloads in SDRAM without the legacy cache's window over-copy. */
+	while (count > 0U) {
+		const UINT chunk = count > CONFIG_FATFS_CACHE_SIZE ? CONFIG_FATFS_CACHE_SIZE : count;
+		const uint64_t blocks_read = chunk == 1U
+			? sdmmc_blk_read_pio(&card0, read_bounce, sector)
+			: sdmmc_blk_read(&card0, read_bounce, sector, chunk);
+		if (blocks_read != chunk)
+			return RES_ERROR;
+		memcpy(buff, read_bounce, chunk * FF_MIN_SS);
+		buff += chunk * FF_MIN_SS;
+		sector += chunk;
+		count -= chunk;
+	}
+	return RES_OK;
+#elif defined(CONFIG_FATFS_CACHE_SIZE)
 	first = sector;
 	last  = sector + count;
 	bytes = count * FF_MIN_SS;
 
-	trace("FATFS: read %" PRIu32 " sectors at %" PRIu32 "\r\n", (uint32_t)count, first);
-
-#ifdef CONFIG_FATFS_CACHE_SIZE
 	// Read starts in cache but overflows
 	if (first >= cache_first && first < cache_last && last > cache_last) {
 		chunk = (cache_last - first) * FF_MIN_SS;

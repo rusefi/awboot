@@ -1,6 +1,12 @@
 #ifndef __BOARD_H__
 #define __BOARD_H__
 
+/* These must be visible before any included header reaches FatFs config. */
+#define CONFIG_BOOT_SPINAND 0
+#define CONFIG_BOOT_SDCARD	0
+#define CONFIG_BOOT_MMC		1
+#define CONFIG_RAUC_EMMC	0
+
 #include "dram.h"
 #include "sunxi_spi.h"
 #include "sunxi_usart.h"
@@ -35,12 +41,6 @@
 #define CONFIG_CONF_FILENAME	"boot.cfg"
 #define CONFIG_DEFAULT_BOOT_CMD "console=ttyS0,115200 earlycon"
 #define CONFIG_BOOT_MAX_TRIES	2
-
-/* Boot source configuration flags (1 = enabled) */
-#define CONFIG_BOOT_SPINAND 0
-#define CONFIG_BOOT_SDCARD	0
-#define CONFIG_BOOT_MMC		1
-#define CONFIG_RAUC_EMMC	0
 
 #define CONFIG_FATFS_CACHE_SIZE		 36 // (unit: 512B sectors, multiples of 8 to match FAT's 4KB)
 #define CONFIG_SDMMC_SPEED_TEST_SIZE 2048 // (unit: 512B sectors)

@@ -131,6 +131,7 @@
 
 #define MMC_WRITE_TIMEOUT_MS 6000U
 #define MMC_FLUSH_TIMEOUT_MS 30000U
+#define MMC_READ_STATE_TIMEOUT_MS 6000U
 
 #define EXT_CSD_CARD_TYPE_26	   (1 << 0) /* Card can run at 26MHz */
 #define EXT_CSD_CARD_TYPE_52	   (1 << 1) /* Card can run at 52MHz */
@@ -339,6 +340,19 @@ static int sdmmc_status(sdhci_t *hci, sdmmc_t *card)
 	return -1;
 }
 
+static bool sdmmc_status_once(sdhci_t *hci, sdmmc_t *card, uint32_t *status)
+{
+	sdhci_cmd_t cmd = {0};
+
+	cmd.idx		 = MMC_SEND_STATUS;
+	cmd.resptype = MMC_RSP_R1;
+	cmd.arg		 = card->rca << 16;
+	if (!sdhci_transfer(hci, &cmd, NULL))
+		return false;
+	*status = cmd.response[0];
+	return true;
+}
+
 static bool sdmmc_wait_ready(sdmmc_pdata_t *data, uint32_t timeout_ms)
 {
 	const uint32_t start = time_ms();
@@ -391,11 +405,13 @@ static bool mmc_refresh_ext_csd(sdmmc_pdata_t *data)
 	return sdmmc_wait_ready(data, MMC_WRITE_TIMEOUT_MS);
 }
 
-static uint64_t sdmmc_read_blocks(sdhci_t *hci, sdmmc_t *card, uint8_t *buf, uint64_t start, uint64_t blkcnt)
+static uint64_t sdmmc_read_blocks(sdhci_t *hci, sdmmc_t *card, uint8_t *buf, uint64_t start, uint64_t blkcnt,
+								  bool pio)
 {
 	sdhci_cmd_t	 cmd = {0};
 	sdhci_data_t dat = {0};
-	int			 status;
+	uint32_t	 card_status = 0U;
+	uint32_t	 state_start;
 
 	if (blkcnt > 1)
 		cmd.idx = MMC_READ_MULTIPLE_BLOCK;
@@ -408,6 +424,8 @@ static uint64_t sdmmc_read_blocks(sdhci_t *hci, sdmmc_t *card, uint8_t *buf, uin
 	cmd.resptype = MMC_RSP_R1;
 	dat.buf		 = buf;
 	dat.flag	 = MMC_DATA_READ;
+	if (pio)
+		dat.flag |= MMC_DATA_PIO;
 	dat.blksz	 = card->read_bl_len;
 	dat.blkcnt	 = blkcnt;
 
@@ -417,12 +435,25 @@ static uint64_t sdmmc_read_blocks(sdhci_t *hci, sdmmc_t *card, uint8_t *buf, uin
 	}
 
 	if (!hci->isspi) {
-		do {
-			status = sdmmc_status(hci, card);
-			if (status < 0) {
+		state_start = time_ms();
+		for (;;) {
+			if (sdmmc_status_once(hci, card, &card_status)) {
+				if ((card_status & MMC_STATUS_ERROR_MASK) != 0U) {
+					warning("SMHC: read status error 0x%08" PRIx32 "\r\n", card_status);
+					return 0;
+				}
+				if ((card_status & MMC_STATUS_READY_FOR_DATA) != 0U) {
+					const uint32_t state = (card_status >> 9) & 0xfU;
+					if (state == MMC_STATUS_TRAN || state == MMC_STATUS_DATA)
+						break;
+				}
+			}
+			if (time_ms() - state_start > MMC_READ_STATE_TIMEOUT_MS) {
+				warning("SMHC: read state timeout (0x%08" PRIx32 ")\r\n", card_status);
 				return 0;
 			}
-		} while ((status != MMC_STATUS_TRAN) && (status != MMC_STATUS_DATA));
+			mdelay(1);
+		}
 	}
 
 	if (blkcnt > 1) {
@@ -807,7 +838,7 @@ uint64_t sdmmc_blk_read(sdmmc_pdata_t *data, uint8_t *buf, uint64_t blkno, uint6
 
 	while (blks > 0) {
 		cnt = (blks > 127) ? 127 : blks;
-		if (sdmmc_read_blocks(data->hci, sdcard, buf, blkno, cnt) != cnt) {
+		if (sdmmc_read_blocks(data->hci, sdcard, buf, blkno, cnt, false) != cnt) {
 			data->online = false;
 			return 0;
 		}
@@ -816,6 +847,18 @@ uint64_t sdmmc_blk_read(sdmmc_pdata_t *data, uint8_t *buf, uint64_t blkno, uint6
 		buf += cnt * sdcard->read_bl_len;
 	}
 	return blkcnt;
+}
+
+uint64_t sdmmc_blk_read_pio(sdmmc_pdata_t *data, uint8_t *buf, uint64_t blkno)
+{
+	if (data == NULL || data->hci == NULL || !data->online || buf == NULL || ((uintptr_t)buf & 3U) != 0U) {
+		return 0;
+	}
+	if (sdmmc_read_blocks(data->hci, &data->card, buf, blkno, 1U, true) != 1U) {
+		data->online = false;
+		return 0;
+	}
+	return 1U;
 }
 
 bool sdmmc_blk_write(sdmmc_pdata_t *data, const uint8_t *buf, uint64_t blkno)

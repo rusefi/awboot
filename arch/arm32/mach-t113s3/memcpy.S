@@ -23,8 +23,6 @@
  * (to trap each unaligned memory access) or somehow mess with strongly
  * ordered/device memory.
  */
-#define ENABLE_UNALIGNED_MEM_ACCESSES 1
-
 #define NEON_MAX_PREFETCH_DISTANCE 320
 
 memcpy:
