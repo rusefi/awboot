@@ -241,7 +241,6 @@ int main(void)
 			 rauc_boot_result.root_partuuid,
 			 (unsigned int)rauc_boot_result.state.tries_remaining[rauc_boot_result.selected_slot],
 			 rauc_boot_result.fallback ? " fallback" : "");
-		sunxi_wdg_set(16);
 		if (mount_sdmmc_volume(rauc_boot_result.selected_slot) != 0) {
 			fatal("SMHC: slot volume mount failed\r\n");
 		}
@@ -381,6 +380,13 @@ int main(void)
 
 	info("booting linux...\r\n");
 	board_set_led(LED_BOARD, 0);
+
+#if CONFIG_RAUC_EMMC
+	/* Linux owns trial watchdog continuity after handoff. */
+	if (awboot_rauc_boot_watchdog_required(&rauc_boot_result)) {
+		sunxi_wdg_set(16);
+	}
+#endif
 
 	arm32_mmu_disable();
 	arm32_dcache_disable();

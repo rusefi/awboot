@@ -39,6 +39,8 @@ enum awboot_rauc_boot_status {
 enum awboot_rauc_boot_status awboot_rauc_boot_prepare(
 	const struct awboot_rauc_boot_io *io, struct awboot_rauc_boot_result *result);
 
+bool awboot_rauc_boot_watchdog_required(const struct awboot_rauc_boot_result *result);
+
 bool awboot_rauc_boot_format_cmdline(const struct awboot_rauc_boot_result *result,
 									 char output[AWBOOT_RAUC_CMDLINE_SIZE]);
 

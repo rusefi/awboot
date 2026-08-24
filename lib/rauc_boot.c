@@ -108,6 +108,11 @@ enum awboot_rauc_boot_status awboot_rauc_boot_prepare(
 	return AWBOOT_RAUC_BOOT_OK;
 }
 
+bool awboot_rauc_boot_watchdog_required(const struct awboot_rauc_boot_result *result)
+{
+	return result != NULL && result->selection == AWBOOT_BOOTSTATE_SELECTION_TRIAL;
+}
+
 bool awboot_rauc_boot_format_cmdline(const struct awboot_rauc_boot_result *result,
 									 char output[AWBOOT_RAUC_CMDLINE_SIZE])
 {

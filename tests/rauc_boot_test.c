@@ -160,6 +160,7 @@ static void test_confirmed_slot(void)
 	assert(result.selected_slot == AWBOOT_BOOTSTATE_SLOT_A);
 	assert(result.selection == AWBOOT_BOOTSTATE_SELECTION_CONFIRMED);
 	assert(!result.fallback);
+	assert(!awboot_rauc_boot_watchdog_required(&result));
 	assert(strcmp(result.root_partuuid, "076c4a2a-05") == 0);
 	assert(disk.writes == 0U);
 	assert(awboot_rauc_boot_format_cmdline(&result, cmdline));
@@ -180,6 +181,7 @@ static void test_trial_is_committed_before_boot(void)
 	assert(awboot_rauc_boot_prepare(&io, &result) == AWBOOT_RAUC_BOOT_OK);
 	assert(result.selected_slot == AWBOOT_BOOTSTATE_SLOT_B);
 	assert(result.selection == AWBOOT_BOOTSTATE_SELECTION_TRIAL);
+	assert(awboot_rauc_boot_watchdog_required(&result));
 	assert(result.state.tries_remaining[AWBOOT_BOOTSTATE_SLOT_B] == 2U);
 	assert(result.state.generation == 11U);
 	assert(strcmp(result.root_partuuid, "076c4a2a-06") == 0);
@@ -205,6 +207,7 @@ static void test_fallback_updates_active_slot(void)
 	assert(result.selected_slot == AWBOOT_BOOTSTATE_SLOT_A);
 	assert(result.selection == AWBOOT_BOOTSTATE_SELECTION_CONFIRMED);
 	assert(result.fallback);
+	assert(!awboot_rauc_boot_watchdog_required(&result));
 	assert(result.state.active_slot == AWBOOT_BOOTSTATE_SLOT_A);
 	assert(result.state.generation == 11U);
 	assert(disk.writes == 1U);
@@ -232,6 +235,7 @@ static void test_fail_closed(void)
 	disk.write_ok = false;
 	io = io_for(&disk);
 	assert(awboot_rauc_boot_prepare(&io, &result) == AWBOOT_RAUC_BOOTSTATE_COMMIT_FAILED);
+	assert(!awboot_rauc_boot_watchdog_required(NULL));
 }
 
 int main(void)
