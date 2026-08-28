@@ -953,21 +953,27 @@ bool sdhci_set_clock(sdhci_t *sdhci, smhc_clk_t clock)
 int sunxi_sdhci_init(sdhci_t *sdhci)
 {
 	sunxi_gpio_init(sdhci->gpio_clk.pin, sdhci->gpio_clk.mux);
+	sunxi_gpio_set_drive_lvl(sdhci->gpio_clk.pin, 3);
 	sunxi_gpio_set_pull(sdhci->gpio_clk.pin, GPIO_PULL_UP);
 
 	sunxi_gpio_init(sdhci->gpio_cmd.pin, sdhci->gpio_cmd.mux);
+	sunxi_gpio_set_drive_lvl(sdhci->gpio_cmd.pin, 3);
 	sunxi_gpio_set_pull(sdhci->gpio_cmd.pin, GPIO_PULL_UP);
 
 	sunxi_gpio_init(sdhci->gpio_d0.pin, sdhci->gpio_d0.mux);
+	sunxi_gpio_set_drive_lvl(sdhci->gpio_d0.pin, 3);
 	sunxi_gpio_set_pull(sdhci->gpio_d0.pin, GPIO_PULL_UP);
 
 	sunxi_gpio_init(sdhci->gpio_d1.pin, sdhci->gpio_d1.mux);
+	sunxi_gpio_set_drive_lvl(sdhci->gpio_d1.pin, 3);
 	sunxi_gpio_set_pull(sdhci->gpio_d1.pin, GPIO_PULL_UP);
 
 	sunxi_gpio_init(sdhci->gpio_d2.pin, sdhci->gpio_d2.mux);
+	sunxi_gpio_set_drive_lvl(sdhci->gpio_d2.pin, 3);
 	sunxi_gpio_set_pull(sdhci->gpio_d2.pin, GPIO_PULL_UP);
 
 	sunxi_gpio_init(sdhci->gpio_d3.pin, sdhci->gpio_d3.mux);
+	sunxi_gpio_set_drive_lvl(sdhci->gpio_d3.pin, 3);
 	sunxi_gpio_set_pull(sdhci->gpio_d3.pin, GPIO_PULL_UP);
 
 	init_default_timing(sdhci);
