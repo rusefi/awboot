@@ -133,6 +133,15 @@
 #define MMC_FLUSH_TIMEOUT_MS 30000U
 #define MMC_READ_STATE_TIMEOUT_MS 6000U
 
+#define SD_DEFAULT_SPEED_HZ			  25000000U
+#define SD_SWITCH_CHECK_ARGUMENT	  0x00fffff1U
+#define SD_SWITCH_SET_ARGUMENT		  0x80fffff1U
+#define SD_SWITCH_STATUS_SIZE		  64U
+#define SD_SWITCH_HIGH_SPEED_SUPPORT  0x02U
+#define SD_SWITCH_HIGH_SPEED_FUNCTION 0x01U
+#define SD_SWITCH_CHECK_ATTEMPTS	  4U
+#define SD_CCC_SWITCH				  (1U << 10)
+
 #define EXT_CSD_CARD_TYPE_26	   (1 << 0) /* Card can run at 26MHz */
 #define EXT_CSD_CARD_TYPE_52	   (1 << 1) /* Card can run at 52MHz */
 #define EXT_CSD_CARD_TYPE_MASK	   0x3F /* Mask out reserved bits */
@@ -275,6 +284,62 @@ static bool sd_send_op_cond(sdhci_t *hci, sdmmc_t *card)
 	card->rca			= 0;
 
 	return TRUE;
+}
+#endif
+
+#if CONFIG_BOOT_SDCARD
+static bool sd_enable_high_speed(sdhci_t *hci, sdmmc_t *card)
+{
+	sdhci_cmd_t  cmd = {0};
+	sdhci_data_t dat = {0};
+	u32		 switch_status_words[SD_SWITCH_STATUS_SIZE / sizeof(u32)] = {0};
+	u8		*switch_status = (u8 *)switch_status_words;
+	u32		 attempt;
+
+	if ((UNSTUFF_BITS(card->csd, 84, 12) & SD_CCC_SWITCH) == 0U) {
+		debug("SMHC: SD card does not advertise switch-function support\r\n");
+		return false;
+	}
+
+	cmd.idx		 = SD_CMD_SWITCH_FUNC;
+	cmd.resptype = MMC_RSP_R1;
+	dat.buf		 = switch_status;
+	dat.flag	 = MMC_DATA_READ | MMC_DATA_PIO;
+	dat.blksz	 = SD_SWITCH_STATUS_SIZE;
+	dat.blkcnt	 = 1U;
+
+	for (attempt = 0U; attempt < SD_SWITCH_CHECK_ATTEMPTS; attempt++) {
+		memset(switch_status, 0, SD_SWITCH_STATUS_SIZE);
+		cmd.arg = SD_SWITCH_CHECK_ARGUMENT;
+		if (!sdhci_transfer(hci, &cmd, &dat) || (cmd.response[0] & MMC_STATUS_ERROR_MASK) != 0U) {
+			debug("SMHC: SD CMD6 query failed\r\n");
+			return false;
+		}
+		if ((switch_status[29] & SD_SWITCH_HIGH_SPEED_SUPPORT) == 0U)
+			break;
+	}
+
+	if ((switch_status[29] & SD_SWITCH_HIGH_SPEED_SUPPORT) != 0U) {
+		debug("SMHC: SD CMD6 high-speed function remained busy\r\n");
+		return false;
+	}
+	if ((switch_status[13] & SD_SWITCH_HIGH_SPEED_SUPPORT) == 0U) {
+		debug("SMHC: SD card does not support high-speed timing\r\n");
+		return false;
+	}
+
+	memset(switch_status, 0, SD_SWITCH_STATUS_SIZE);
+	cmd.arg = SD_SWITCH_SET_ARGUMENT;
+	if (!sdhci_transfer(hci, &cmd, &dat) || (cmd.response[0] & MMC_STATUS_ERROR_MASK) != 0U) {
+		debug("SMHC: SD CMD6 switch failed\r\n");
+		return false;
+	}
+	if ((switch_status[16] & 0x0fU) != SD_SWITCH_HIGH_SPEED_FUNCTION) {
+		debug("SMHC: SD CMD6 high-speed function not selected\r\n");
+		return false;
+	}
+
+	return true;
 }
 #endif
 
@@ -712,6 +777,16 @@ static bool sdmmc_detect(sdhci_t *hci, sdmmc_t *card)
 		}
 	} else {
 		if (card->version & SD_VERSION_SD) {
+#if CONFIG_BOOT_SDCARD
+			smhc_clk_t sd_clock = MMC_CLK_400K;
+
+			if (hci->clock_wanted >= MMC_CLK_25M && card->tran_speed >= SD_DEFAULT_SPEED_HZ)
+				sd_clock = MMC_CLK_25M;
+			if (!sdhci_set_clock(hci, sd_clock)) {
+				error("SMHC: SD legacy clock failed\r\n");
+				return FALSE;
+			}
+
 			if (hci->width == MMC_BUS_WIDTH_4)
 				width = 2;
 			else
@@ -719,15 +794,34 @@ static bool sdmmc_detect(sdhci_t *hci, sdmmc_t *card)
 
 			cmd.idx		 = MMC_APP_CMD;
 			cmd.arg		 = card->rca << 16;
-			cmd.resptype = MMC_RSP_R5;
-			if (!sdhci_transfer(hci, &cmd, NULL))
+			cmd.resptype = MMC_RSP_R1;
+			if (!sdhci_transfer(hci, &cmd, NULL) || (cmd.response[0] & MMC_STATUS_ERROR_MASK) != 0U)
 				return FALSE;
 
 			cmd.idx		 = SD_CMD_SWITCH_FUNC;
 			cmd.arg		 = width;
 			cmd.resptype = MMC_RSP_R1;
-			if (!sdhci_transfer(hci, &cmd, NULL))
+			if (!sdhci_transfer(hci, &cmd, NULL) || (cmd.response[0] & MMC_STATUS_ERROR_MASK) != 0U)
 				return FALSE;
+			if (!sdhci_set_width(hci, hci->width)) {
+				error("SMHC: SD width failed\r\n");
+				return FALSE;
+			}
+
+			if (hci->clock_wanted >= MMC_CLK_50M && sd_enable_high_speed(hci, card)) {
+				if (!sdhci_set_clock(hci, MMC_CLK_50M)) {
+					error("SMHC: SD HS clock failed\r\n");
+					return FALSE;
+				}
+				info("SMHC: SD HS 50MHz\r\n");
+			} else if (sd_clock == MMC_CLK_25M) {
+				info("SMHC: SD legacy 25MHz\r\n");
+			} else {
+				info("SMHC: SD legacy 400KHz\r\n");
+			}
+#else
+			return FALSE;
+#endif
 		} else if (card->version & MMC_VERSION_MMC) {
 #if CONFIG_MMC_ENABLE_RSTN
 			if (card->extcsd[EXT_CSD_RST_N_FUNCTION] == 0) {
@@ -810,10 +904,11 @@ static bool sdmmc_detect(sdhci_t *hci, sdmmc_t *card)
 				return FALSE;
 
 			udelay(1000);
-		}
-		if (!sdhci_set_clock(hci, hci->clock_wanted) || !sdhci_set_width(hci, hci->width)) {
-			error("SMHC: set clock/width failed\r\n");
-			return FALSE;
+
+			if (!sdhci_set_clock(hci, hci->clock_wanted) || !sdhci_set_width(hci, hci->width)) {
+				error("SMHC: set clock/width failed\r\n");
+				return FALSE;
+			}
 		}
 	}
 
