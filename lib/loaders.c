@@ -91,6 +91,87 @@ static FRESULT read_stream(const char *path, void (*consume)(const uint8_t *, UI
 	return close_result;
 }
 
+
+static LBA_t fatfs_clst2sect(/* !=0:Sector number, 0:Failed (invalid cluster#) */
+					   FATFS *fs, /* Filesystem object */
+					   DWORD  clst /* Cluster# to be converted */
+)
+{
+	clst -= 2; /* Cluster number is origin from 2 */
+	if (clst >= fs->n_fatent - 2)
+		return 0; /* Is it invalid cluster number? */
+	return fs->database + (LBA_t)fs->csize * clst; /* Start sector number of the cluster */
+}
+
+static int read_direct(const char *path, uint8_t *dest)
+{
+	FRESULT fret;
+	FIL	file;
+	UINT	bytes_read = 0U;
+#if CONFIG_RAUC_EMMC
+	char volume_path[MAX_FILENAME_SIZE + 4U];
+
+	const size_t path_length = strlen(path);
+	if (!volume_mounted || path_length + 4U > sizeof(volume_path))
+		return FR_INVALID_PARAMETER;
+	volume_path[0] = (char)('0' + active_volume);
+	volume_path[1] = ':';
+	volume_path[2] = '/';
+	memcpy(volume_path + 3U, path[0] == '/' ? path + 1U : path,
+		   path[0] == '/' ? path_length : path_length + 1U);
+	if (path[0] == '/')
+		volume_path[path_length + 2U] = '\0';
+	path = volume_path;
+#endif
+
+	fret = f_open(&file, path, FA_READ);
+	if (fret != FR_OK)
+		return -fret;
+
+	static DWORD cltbl[CLTBL_DWORDS];
+	cltbl[0]    = CLTBL_DWORDS;
+	file.cltbl  = cltbl;
+	fret = f_lseek(&file, CREATE_LINKMAP);
+	if ((fret != FR_OK) && (fret != FR_NOT_ENOUGH_CORE)) {
+		f_close(&file);
+		return -fret;
+	}
+
+	if (fret == FR_OK) {
+		DWORD *map = cltbl;
+		u32 num_extents = map[0];
+		u32 index = 1;
+
+		u32 chunks = (num_extents - 2) / 2;
+		debug("%s total chunks %" PRIu32 "\r\n", path, chunks);
+
+		for (u32 i = 0; i < chunks; i++) {
+			uint64_t blkno = fatfs_clst2sect(&fs, map[index + 1]);
+			uint64_t blkcnt = fs.csize * map[index];
+
+			if (sdmmc_blk_read(&card0, dest, blkno, blkcnt) != blkcnt) {
+				return -1;
+			}
+
+			bytes_read += blkcnt * 512;
+			dest += blkcnt * 512;
+			index += 2;
+		}
+	} else {
+		// fallback to slow mode
+		fret = f_read(&file, dest, f_size(&file), &bytes_read);
+	}
+
+	file.cltbl = NULL;
+	f_close(&file);
+
+	if (fret != FR_OK) {
+		return -fret;
+	}
+
+	return bytes_read;
+}
+
 typedef struct {
 	uint8_t *dest;
 	u32	 total;
@@ -208,6 +289,7 @@ int read_file(const char *filename, uint8_t *dest)
 	u32 start = time_ms();
 #endif
 
+#if 0
 	read_copy_state.dest  = dest;
 	read_copy_state.total = 0U;
 
@@ -220,6 +302,9 @@ int read_file(const char *filename, uint8_t *dest)
 	}
 
 	u32 total_bytes = read_copy_state.total;
+#else
+	u32 total_bytes = read_direct(filename, dest);
+#endif
 
 #if LOG_LEVEL >= LOG_DEBUG
 	u32 duration	 = time_ms() - start + 1U;
