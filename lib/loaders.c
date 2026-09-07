@@ -193,11 +193,13 @@ void sdmmc_speed_test(void)
 	u32 kb_tested;
 	u32 kb_per_second;
 
-	sdmmc_blk_read(&card0, (u8 *)(SDRAM_BASE), 0, CONFIG_SDMMC_SPEED_TEST_SIZE);
+	if (sdmmc_blk_read(&card0, (u8 *)(SDRAM_BASE), 0, CONFIG_SDMMC_SPEED_TEST_SIZE) <= 0) {
+		return;
+	}
 	test_time	  = time_ms() - start;
 	kb_tested	  = (CONFIG_SDMMC_SPEED_TEST_SIZE * 512U) / 1024U;
 	kb_per_second = (test_time == 0U) ? 0U : (CONFIG_SDMMC_SPEED_TEST_SIZE * 512U) / test_time;
-	if (kb_per_second < 1000) {
+	if (kb_per_second < 10000) {
 		info("SDMMC: speedtest %" PRIu32 "KB in %" PRIu32 "ms at %" PRIu32 "KB/S\r\n", kb_tested, test_time,
 			 kb_per_second);
 	} else {
